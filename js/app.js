@@ -112,15 +112,29 @@ function calcTarjeta(t) {
     const fact = Math.min(m.cuotas, cortesEntre(f, c.corte, t.dia_corte));
     noFacturado[m.moneda] += num(m.monto) * (1 - fact / m.cuotas);
   }
-  const pendiente = {
+  let pendiente = {
     PEN: Math.max(0, deuda.PEN - desdeCorte.PEN - noFacturado.PEN),
     USD: Math.max(0, deuda.USD - desdeCorte.USD - noFacturado.USD),
   };
+  // Tarjeta registrada después del último corte: la app aún no sabe qué parte de la deuda está facturada.
+  // Si diste el "pago del mes" al registrarla, se usa ese monto menos los pagos que registres desde ese día.
+  let sinHistorial = Boolean(t.creado && new Date(t.creado) >= c.finCorte);
+  if (sinHistorial && (t.facturado_inicial_pen != null || t.facturado_inicial_usd != null)) {
+    const desde = new Date(t.creado); desde.setHours(0, 0, 0, 0);
+    const pagado = { PEN: 0, USD: 0 };
+    for (const m of estado.movimientos) {
+      if (m.tarjeta_id === t.id && m.tipo === 'pago_tarjeta' && new Date(m.fecha) >= desde) pagado[m.moneda] += num(m.monto);
+    }
+    pendiente = {
+      PEN: Math.max(0, num(t.facturado_inicial_pen) - pagado.PEN),
+      USD: Math.max(0, num(t.facturado_inicial_usd) - pagado.USD),
+    };
+    sinHistorial = false;
+  }
   const hayPendiente = pendiente.PEN > 0.009 || pendiente.USD > 0.009;
   const pagoVencido = c.pago < hoy0();
   const paraBajar30 = Math.max(0, usado - 0.3 * linea);
   const nivel = util >= 0.5 ? 'bad' : util >= 0.3 ? 'warn' : 'ok';
-  const sinHistorial = t.creado && new Date(t.creado) >= c.finCorte;
   return { deuda, usado, linea, util, c, desdeCorte, pendiente, hayPendiente, pagoVencido, paraBajar30, nivel, tc, sinHistorial, disponible: Math.max(0, linea - usado) };
 }
 
@@ -703,6 +717,8 @@ async function guardarMov(d, original) {
 
 /* ---- Tarjetas ---- */
 function formTarjeta(t = null) {
+  // "Pago del mes" solo tiene sentido al crear la tarjeta o antes de su primer corte en la app.
+  const pideFacturado = !t || (t.creado && new Date(t.creado) >= ciclo(t).finCorte);
   const cuerpo = `
     ${campo('t-banco', 'Banco', `<select id="t-banco" name="banco">${BANCOS.map((b) => opt(b, b, t?.banco || 'Interbank')).join('')}</select>`)}
     ${campo('t-nombre', 'Nombre', `<input id="t-nombre" name="nombre" value="${esc(t?.nombre)}" placeholder="Ej. Interbank Visa Clásica">`)}
@@ -714,11 +730,23 @@ function formTarjeta(t = null) {
       <div>${campo('t-corte', 'Día de corte', `<input id="t-corte" name="dia_corte" type="number" min="1" max="31" value="${esc(t?.dia_corte ?? '')}">`)}</div>
       <div>${campo('t-pago', 'Último día de pago', `<input id="t-pago" name="dia_pago" type="number" min="1" max="31" value="${esc(t?.dia_pago ?? '')}">`)}</div>
     </div>
-    <div class="grid2">
-      <div>${campo('t-dpen', 'Deuda hoy S/', `<input id="t-dpen" name="deuda_inicial_pen" inputmode="decimal" value="${esc(t?.deuda_inicial_pen ?? 0)}">`)}</div>
-      <div>${campo('t-dusd', 'Deuda hoy US$', `<input id="t-dusd" name="deuda_inicial_usd" inputmode="decimal" value="${esc(t?.deuda_inicial_usd ?? 0)}">`)}</div>
+    <div class="form-grupo">
+      <h3>Deuda total</h3>
+      <p class="hint" style="margin-top:0">Todo lo que debes hoy en la tarjeta (incluye compras en cuotas aún no cobradas).</p>
+      <div class="grid2">
+        <div>${campo('t-dpen', 'Soles S/', `<input id="t-dpen" name="deuda_inicial_pen" inputmode="decimal" value="${esc(t?.deuda_inicial_pen ?? 0)}">`)}</div>
+        <div>${campo('t-dusd', 'Dólares US$', `<input id="t-dusd" name="deuda_inicial_usd" inputmode="decimal" value="${esc(t?.deuda_inicial_usd ?? 0)}">`)}</div>
+      </div>
     </div>
-    <p class="hint">La deuda que muestra hoy la app del banco. Desde aquí, la app suma consumos y resta pagos sola.</p>
+    ${pideFacturado ? `<div class="form-grupo">
+      <h3>Pago del mes</h3>
+      <p class="hint" style="margin-top:0">Lo que te <b>falta pagar</b> de tu último estado de cuenta (el “pago total del mes”). Si ya lo pagaste completo, pon 0.</p>
+      <div class="grid2">
+        <div>${campo('t-fpen', 'Soles S/', `<input id="t-fpen" name="facturado_inicial_pen" inputmode="decimal" value="${esc(t?.facturado_inicial_pen ?? '')}" placeholder="0.00">`)}</div>
+        <div>${campo('t-fusd', 'Dólares US$', `<input id="t-fusd" name="facturado_inicial_usd" inputmode="decimal" value="${esc(t?.facturado_inicial_usd ?? '')}" placeholder="0.00">`)}</div>
+      </div>
+      <p class="hint">Solo se usa hasta tu próximo corte; después la app lo calcula sola.</p>
+    </div>` : ''}
     ${campo('t-color', 'Color de la tarjeta', `<input id="t-color" name="color" type="color" value="${esc(t ? colorDe(t) : COLOR_BANCO.Interbank)}" style="height:48px;padding:4px">`)}`;
   abrirSheet(t ? 'Editar tarjeta' : 'Nueva tarjeta', cuerpo, async (d) => {
     const reg = {
@@ -726,6 +754,14 @@ function formTarjeta(t = null) {
       dia_corte: parseInt(d.dia_corte, 10), dia_pago: parseInt(d.dia_pago, 10),
       deuda_inicial_pen: num(d.deuda_inicial_pen), deuda_inicial_usd: num(d.deuda_inicial_usd), color: d.color,
     };
+    if (pideFacturado) {
+      const vacio = (v) => String(v ?? '').trim() === '';
+      reg.facturado_inicial_pen = vacio(d.facturado_inicial_pen) && vacio(d.facturado_inicial_usd) ? null : num(d.facturado_inicial_pen);
+      reg.facturado_inicial_usd = reg.facturado_inicial_pen === null ? null : num(d.facturado_inicial_usd);
+      if (reg.facturado_inicial_pen > reg.deuda_inicial_pen + 0.009 || reg.facturado_inicial_usd > reg.deuda_inicial_usd + 0.009) {
+        throw new Error('El pago del mes no puede ser mayor que la deuda total.');
+      }
+    }
     if (!reg.nombre) throw new Error('Ponle un nombre a la tarjeta.');
     if (reg.ultimos4 && !/^\d{4}$/.test(reg.ultimos4)) throw new Error('Los últimos dígitos deben ser 4 números.');
     if (!(reg.linea > 0)) throw new Error('Ingresa la línea de crédito.');

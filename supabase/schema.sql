@@ -30,6 +30,9 @@ create table if not exists public.tarjetas (
   activa            boolean not null default true,
   creado            timestamptz not null default now()
 );
+-- Pago del mes (estado de cuenta) que faltaba pagar el día que registraste la tarjeta.
+alter table public.tarjetas add column if not exists facturado_inicial_pen numeric;
+alter table public.tarjetas add column if not exists facturado_inicial_usd numeric;
 
 create table if not exists public.cuentas (
   id            uuid primary key default gen_random_uuid(),
