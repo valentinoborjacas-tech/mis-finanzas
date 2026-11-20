@@ -19,7 +19,7 @@ const COLOR_BANCO = { Interbank: '#0a9c55', BBVA: '#1464a5', BCP: '#e0601a', Sco
 const TIPOS = { gasto: 'Gasto', ingreso: 'Ingreso', pago_tarjeta: 'Pagar tarjeta', transferencia: 'Transferir' };
 const TIPOS_CUENTA = { efectivo: 'Efectivo', ahorro: 'Ahorros', corriente: 'Cuenta corriente' };
 const TIPOS_DEUDA = { cuotas: 'Compra en cuotas', prestamo: 'Préstamo', persona: 'Deuda con persona' };
-const PALETA = ['#2ee6a6', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c', '#22d3ee', '#64748b'];
+const PALETA = ['#d4af37', '#f6e7b4', '#a87f1e', '#e8c56a', '#8c7a55', '#f3d27a', '#6b5a35', '#57534e'];
 
 const ICON = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
