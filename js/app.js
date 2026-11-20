@@ -182,7 +182,6 @@ const enSoles = (m) => num(m.monto) * (m.moneda === 'USD' ? tc() : 1);
 /* ================= Piezas visuales ================= */
 const chip = (fondo = '#e8c766', linea = '#a98a2b') => `<svg class="pl-chip" viewBox="0 0 42 32"><rect x="1" y="1" width="40" height="30" rx="7" fill="${fondo}"/><path d="M1 11h13M1 21h13M28 11h13M28 21h13M14 1v30M28 1v30" stroke="${linea}" stroke-width="1.4" fill="none"/></svg>`;
 const CHIP = chip();
-const SIN_CONTACTO = '<svg class="pl-nfc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8.5 8.5a5 5 0 0 1 0 7M12 6a8.5 8.5 0 0 1 0 12M15.5 3.5a12 12 0 0 1 0 17"/></svg>';
 
 // Red (Visa / Mastercard / Amex) y nivel (Platinum, Oro…) a partir del nombre de la tarjeta.
 function redDe(t) {
@@ -198,28 +197,27 @@ function logoRed(red) {
   return '';
 }
 
-// Diseño BBVA (como la tarjeta física): logo, chip con sin contacto, línea con la "A" y red abajo a la derecha.
-function plasticoBBVA(t, k, attrs) {
-  const { red, nivel } = redDe(t);
-  const platino = /platinum|platino/i.test(t.nombre);
-  return `<div class="plastico bbva ${platino ? 'platino' : ''}" style="--c:${esc(colorDe(t))}" ${attrs}>
-    <svg class="pl-deco" viewBox="0 0 300 189" aria-hidden="true">
-      <path d="M84 84H139M161 84H284" stroke="rgba(255,255,255,.45)" stroke-width="1.3"/>
-      <circle cx="285" cy="84" r="4.5" fill="rgba(30,32,38,.75)"/>
-      <path d="M108 168 140 70q3-8 10-8t10 8l32 98" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="2.2" stroke-linejoin="round"/>
-      <path d="M118 168 150 76l32 92" fill="none" stroke="rgba(0,0,0,.14)" stroke-width="2"/>
-    </svg>
-    <div class="pl-top"><span class="logo-bbva">BBV<span>Λ</span></span><span class="pill ${k.nivel}">${pct(k.util)} usado</span></div>
-    <div class="pl-chiprow">${SIN_CONTACTO}${platino ? chip('#cfd2d6', '#8c9096') : CHIP}</div>
-    <div class="pl-bottom">
-      <div><span class="pl-num">•••• ${esc(t.ultimos4 || '····')}</span><small>Disponible</small><b>${money(k.disponible)}</b></div>
-      <div class="r pl-red"><small class="pl-credito">Crédito</small>${logoRed(red)}${nivel ? `<small class="pl-nivel">${esc(nivel)}</small>` : ''}</div>
+// Imágenes oficiales de tus tarjetas (carpeta img/). Se muestran tal cual, sin texto encima.
+// zoom: cuánto ampliar para recortar el fondo blanco alrededor de la tarjeta; ratio: ancho/alto de la tarjeta.
+const IMAGENES = [
+  { coincide: (t) => t.banco === 'BBVA', src: 'img/TDC-Visa-Platinum-Home-page.im1728449985303im.avif', zoom: '103.7%', ratio: '926 / 586' },
+  { coincide: (t) => /amex|american/i.test(`${t.nombre} ${t.banco}`), src: 'img/CHG_GREEN.png', zoom: 'cover', ratio: '400 / 266' },
+];
+
+function plasticoImagen(t, k, img, attrs) {
+  return `<div class="plastico-wrap" ${attrs}>
+    <div class="plastico-img" role="img" aria-label="${esc(t.nombre)}"
+      style="background-image:url('${img.src}');background-size:${img.zoom};aspect-ratio:${img.ratio};--c:${esc(colorDe(t))}"></div>
+    <div class="pl-info">
+      <div><b>${esc(t.nombre)}</b><small>•••• ${esc(t.ultimos4 || '····')} · Disponible ${money(k.disponible)}</small></div>
+      <span class="pill ${k.nivel}">${pct(k.util)}</span>
     </div>
   </div>`;
 }
 
 function plastico(t, k, attrs = '') {
-  if (t.banco === 'BBVA') return plasticoBBVA(t, k, attrs);
+  const img = IMAGENES.find((x) => x.coincide(t));
+  if (img) return plasticoImagen(t, k, img, attrs);
   const { red } = redDe(t);
   return `<div class="plastico" style="--c:${esc(colorDe(t))}" ${attrs}>
     <div class="pl-top"><span class="pl-banco">${esc(t.banco)}</span><span class="pill ${k.nivel}">${pct(k.util)} usado</span></div>
@@ -286,6 +284,20 @@ function render() {
     <nav class="tabs">${TABS.map((t) => (t
       ? `<button data-vista="${t[0]}" ${t[0] === estado.vista ? 'aria-current="page"' : ''}>${ic(t[1])}${t[2]}</button>`
       : `<button class="add" data-action="nuevo-mov" aria-label="Registrar movimiento">${ic('plus', 28)}</button>`)).join('')}</nav>`;
+  presentacion();
+}
+
+// Presentación al abrir la app: las tarjetas entran girando, brillan y se quedan quietas (solo una vez).
+function presentacion() {
+  if (estado.presentada) return;
+  const tarjetas = [...app.querySelectorAll('.plastico-img, .plastico:not(.nueva)')];
+  if (!tarjetas.length) return;
+  estado.presentada = true;
+  tarjetas.forEach((el, i) => {
+    el.style.setProperty('--retraso', `${i * 0.18}s`);
+    el.classList.add('entrada');
+    el.addEventListener('animationend', (e) => { if (e.animationName === 'brillo') el.classList.remove('entrada'); });
+  });
 }
 
 function vistaSinConfig() {
