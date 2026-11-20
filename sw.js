@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que abra rápido. Los datos siempre vienen de Supabase.
-const CACHE = 'mis-finanzas-v1';
+const CACHE = 'mis-finanzas-v2';
 const ARCHIVOS = ['./', './index.html', './css/app.css', './js/app.js', './js/config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {

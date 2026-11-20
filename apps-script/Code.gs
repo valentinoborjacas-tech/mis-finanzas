@@ -24,7 +24,7 @@ const CONFIG = {
 // Remitentes de cada banco. Si un correo no se detecta, agrega aquí la dirección exacta del remitente.
 const BANCOS = [
   { nombre: 'Interbank', query: 'from:(interbank OR netinterbank OR interbank.pe OR netinterbank.com.pe)' },
-  { nombre: 'BBVA', query: 'from:(bbva OR bbva.pe OR bbva.com.pe OR bbvanet OR bbvacontinental)' },
+  { nombre: 'BBVA', query: 'from:(procesos@bbva.com.pe OR bbva.com.pe OR bbva)' },
 ];
 
 /* ======================= Tareas automáticas ======================= */
@@ -137,6 +137,16 @@ function probar() {
   });
 }
 
+// Si `probar` no encuentra correos: muestra en qué cuenta corre el script y qué encuentra Gmail.
+function diagnostico() {
+  console.log('Cuenta del script: ' + Session.getEffectiveUser().getEmail());
+  ['from:procesos@bbva.com.pe', 'bbva', 'interbank', 'consumo newer_than:30d', 'newer_than:2d'].forEach((q) => {
+    const hilos = GmailApp.search(q, 0, 3);
+    console.log(`Búsqueda "${q}": ${hilos.length} resultado(s)` +
+      (hilos[0] ? ` · ej: ${hilos[0].getMessages()[0].getFrom()} | ${hilos[0].getFirstMessageSubject()}` : ''));
+  });
+}
+
 /* ======================= Lectura de correos ======================= */
 
 function parsearCorreo_(asunto, texto) {
@@ -156,6 +166,14 @@ function parsearCorreo_(asunto, texto) {
 }
 
 function leerMonto_(t) {
+  // Formato con campos separados (BBVA): "Monto: 105.00  Moneda: PEN"
+  const mm = t.match(/(?:monto|importe)\s*(?:total)?\s*:?\s*(?:S\/\.?|US\$|USD|PEN|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\b/i);
+  const mon = t.match(/moneda\s*:?\s*(PEN|USD|SOLES|D[OÓ]LARES|S\/|US\$)/i);
+  if (mm && mon) {
+    const monto = aNumero_(mm[1]);
+    if (monto > 0) return { monto, moneda: /PEN|SOLES|S\//i.test(mon[1]) ? 'PEN' : 'USD' };
+  }
+  // Formato con símbolo junto al número: "S/ 85.50", "US$ 12.99"
   const re = /(S\/\.?|PEN|US\$|USD|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)/gi;
   const clave = /(monto|importe|total|consumo|valor|cargo|compra)[^0-9\n]{0,25}$/i;
   let primero = null, m;
@@ -191,6 +209,12 @@ function leerUltimos4_(t) {
 }
 
 function leerComercio_(t) {
+  const r = leerComercioCrudo_(t);
+  // Si el correo viene en una sola línea, corta donde empieza el siguiente campo.
+  return r ? r.split(/\s+(?:monto|moneda|fecha|hora|importe|tarjeta)\s*:/i)[0].trim() || null : null;
+}
+
+function leerComercioCrudo_(t) {
   const pats = [
     /(?:comercio|establecimiento|empresa|negocio|lugar)\s*[:\-]\s*([^\n]{2,60})/i,
     /(?:en el comercio|en el establecimiento)\s+([^\n]{2,60})/i,
