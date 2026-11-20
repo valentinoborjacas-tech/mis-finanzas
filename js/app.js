@@ -285,7 +285,19 @@ function render() {
       ? `<button data-vista="${t[0]}" ${t[0] === estado.vista ? 'aria-current="page"' : ''}>${ic(t[1])}${t[2]}</button>`
       : `<button class="add" data-action="nuevo-mov" aria-label="Registrar movimiento">${ic('plus', 28)}</button>`)).join('')}</nav>`;
   presentacion();
+  const pag = $('#paginas');
+  if (pag) pag.scrollLeft = (estado.paginaTarjeta || 0) * pag.clientWidth;
 }
+
+// Al deslizar entre tarjetas: recuerda en cuál estás y mueve el indicador de puntos.
+document.addEventListener('scroll', (e) => {
+  if (e.target.id !== 'paginas') return;
+  const p = e.target;
+  const i = Math.round(p.scrollLeft / p.clientWidth);
+  if (i === estado.paginaTarjeta) return;
+  estado.paginaTarjeta = i;
+  document.querySelectorAll('.puntos i').forEach((d, j) => d.classList.toggle('on', j === i));
+}, true);
 
 // Presentación al abrir la app: las tarjetas entran girando, brillan y se quedan quietas (solo una vez).
 function presentacion() {
@@ -389,7 +401,7 @@ const VISTAS = {
 
       <div class="seccion"><h2>Mis tarjetas</h2><button data-vista="tarjetas">Ver detalle</button></div>
       <div class="carrusel">
-        ${ks.map(([t, k]) => plastico(t, k, 'data-vista="tarjetas"')).join('')}
+        ${ks.map(([t, k], i) => plastico(t, k, `data-vista="tarjetas" data-pagina="${i}"`)).join('')}
         <button class="plastico nueva" data-action="nueva-tarjeta">${ic('plus')}Agregar tarjeta</button>
       </div>
 
@@ -413,7 +425,12 @@ const VISTAS = {
 
   tarjetas() {
     const lista = estado.tarjetas.filter((t) => t.activa);
+    if (!lista.length) return `<div class="card vacio">Agrega tu Interbank y tu BBVA con la deuda que tienen hoy.</div>
+      <button class="btn block ghost" data-action="nueva-tarjeta">${ic('plus', 18)}Agregar tarjeta</button>`;
+    estado.paginaTarjeta = Math.min(estado.paginaTarjeta || 0, lista.length - 1);
     return `
+      ${lista.length > 1 ? `<div class="puntos" aria-hidden="true">${lista.map((t, i) => `<i class="${i === estado.paginaTarjeta ? 'on' : ''}"></i>`).join('')}</div>` : ''}
+      <div class="paginas" id="paginas">
       ${lista.map((t) => {
         const k = calcTarjeta(t);
         const dPago = diasHasta(k.c.pago);
@@ -430,7 +447,7 @@ const VISTAS = {
           pagoStat = `<div class="stat"><span>A pagar este mes</span><b class="pos">Pagado ✓</b><em>próximo: ${fechaCorta(k.c.proxPago)}</em></div>`;
         }
         if (!aviso && k.paraBajar30 > 0.009) aviso = `<div class="banner">${ic('trend', 20)}<span>Paga <b>${money(k.paraBajar30)}</b> antes del corte (${fechaCorta(k.c.proxCorte)}) para cerrar bajo 30%.</span></div>`;
-        return `<section class="tarjeta-bloque">
+        return `<section class="tarjeta-bloque pagina" aria-label="${esc(t.nombre)}">
           ${plastico(t, k)}
           <div class="card uso">
             <div class="row"><span>Uso de línea</span><span class="pill ${k.nivel}">${pct(k.util)}</span></div>
@@ -450,7 +467,8 @@ const VISTAS = {
             <button class="icon-btn" data-action="editar-tarjeta" data-id="${t.id}" aria-label="Editar tarjeta">${ic('edit', 18)}</button>
           </div>
         </section>`;
-      }).join('') || '<div class="card vacio">Agrega tu Interbank y tu BBVA con la deuda que tienen hoy.</div>'}
+      }).join('')}
+      </div>
       <button class="btn block ghost" data-action="nueva-tarjeta">${ic('plus', 18)}Agregar tarjeta</button>`;
   },
 
@@ -592,6 +610,10 @@ function formMovimiento(m = null, tipoInicial = 'gasto') {
   const medioSel = m ? (m.tarjeta_id ? `t:${m.tarjeta_id}` : m.cuenta_id ? `c:${m.cuenta_id}` : '') : (tarjetas[0] ? `t:${tarjetas[0].id}` : cuentas[0] ? `c:${cuentas[0].id}` : '');
   const medios = [...tarjetas.map((t) => [`t:${t.id}`, t.nombre, colorDe(t)]), ...cuentas.map((c) => [`c:${c.id}`, `${c.tipo === 'efectivo' ? '💵' : '🏦'} ${c.nombre}`])];
   const ctas = cuentas.map((c) => [c.id, `${c.tipo === 'efectivo' ? '💵' : '🏦'} ${c.nombre}`]);
+  // Si aún no hay billetera de efectivo, se ofrece "Efectivo" y se crea sola al guardar.
+  const efectivoNuevo = cuentas.some((c) => c.tipo === 'efectivo') ? [] : [['c:__efectivo__', '💵 Efectivo']];
+  const destinosIngreso = [...efectivoNuevo, ...ctas.map(([v, n]) => [`c:${v}`, n])];
+  if (efectivoNuevo.length) medios.push(...efectivoNuevo);
   const cuerpo = `
     <div class="seg" style="margin-top:12px">${Object.entries(TIPOS).map(([k, n]) => `
       <input type="radio" id="tipo-${k}" name="tipo" value="${k}" ${k === tipo ? 'checked' : ''}><label for="tipo-${k}">${n}</label>`).join('')}</div>
@@ -603,7 +625,10 @@ function formMovimiento(m = null, tipoInicial = 'gasto') {
       </div>
     </div>
     <div data-para="gasto"><div class="lbl">Pagado con</div>${opciones('medio_gasto', medios, medioSel)}</div>
-    <div data-para="ingreso"><div class="lbl">Recibido en</div>${opciones('medio_ingreso', [...ctas.map(([v, n]) => [`c:${v}`, n]), ...tarjetas.map((t) => [`t:${t.id}`, `${t.nombre} (devolución)`, colorDe(t)])], m?.tipo === 'ingreso' ? medioSel : (ctas[0] ? `c:${ctas[0][0]}` : ''))}</div>
+    <div data-para="ingreso"><div class="lbl">¿Dónde entró el dinero?</div>${opciones('medio_ingreso',
+      m?.tipo === 'ingreso' && m.tarjeta_id ? [[`t:${m.tarjeta_id}`, tarjetaPorId(m.tarjeta_id)?.nombre || 'Tarjeta'], ...destinosIngreso] : destinosIngreso,
+      m?.tipo === 'ingreso' ? medioSel : destinosIngreso[0]?.[0])}
+      <p class="hint">Efectivo o tu cuenta de ahorros. Las tarjetas de crédito no reciben ingresos.</p></div>
     <div data-para="pago_tarjeta">
       <div class="lbl">Tarjeta que pagaste</div>${opciones('tarjeta', tarjetas.map((t) => [t.id, t.nombre, colorDe(t)]), m?.tarjeta_id || tarjetas[0]?.id)}
       <div class="lbl">Desde</div>${opciones('cuenta_origen', [['', 'Otra cuenta'], ...ctas], m?.tipo === 'pago_tarjeta' ? (m.cuenta_id || '') : '')}
@@ -650,7 +675,12 @@ async function guardarMov(d, original) {
   if (d.tipo === 'gasto' || d.tipo === 'ingreso') {
     const [k, id] = String((d.tipo === 'gasto' ? d.medio_gasto : d.medio_ingreso) || '').split(':');
     if (!id) throw new Error(d.tipo === 'gasto' ? 'Elige con qué pagaste (agrega una tarjeta o cuenta primero).' : 'Elige dónde recibiste el dinero.');
-    if (k === 't') reg.tarjeta_id = id; else reg.cuenta_id = id;
+    if (k === 't') reg.tarjeta_id = id;
+    else if (id === '__efectivo__') {
+      const r = await sb.from('cuentas').insert({ nombre: 'Efectivo', tipo: 'efectivo', moneda: d.moneda, saldo_inicial: 0 }).select('id').single();
+      if (r.error) throw r.error;
+      reg.cuenta_id = r.data.id;
+    } else reg.cuenta_id = id;
     if (d.tipo === 'gasto' && k === 't') reg.cuotas = Math.min(60, Math.max(1, parseInt(d.cuotas, 10) || 1));
   } else if (d.tipo === 'pago_tarjeta') {
     if (!d.tarjeta) throw new Error('Elige la tarjeta que pagaste.');
@@ -872,7 +902,10 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-action]');
   if (a && ACCIONES[a.dataset.action]) { e.preventDefault(); ACCIONES[a.dataset.action](a); return; }
   const v = e.target.closest('[data-vista]');
-  if (v && !dlg.open) irA(v.dataset.vista);
+  if (v && !dlg.open) {
+    if (v.dataset.pagina !== undefined) estado.paginaTarjeta = Number(v.dataset.pagina);
+    irA(v.dataset.vista);
+  }
 });
 
 document.addEventListener('change', (e) => {

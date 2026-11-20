@@ -204,6 +204,15 @@ main { padding: 4px 16px calc(110px + env(safe-area-inset-bottom)); max-width: 6
 
 /* ---------- Detalle de tarjeta ---------- */
 .tarjeta-bloque { margin-bottom: 28px; }
+.paginas {
+  display: flex; align-items: flex-start; overflow-x: auto; scroll-snap-type: x mandatory;
+  margin: 0 -16px; scrollbar-width: none; overscroll-behavior-x: contain;
+}
+.paginas::-webkit-scrollbar { display: none; }
+.pagina { flex: 0 0 100%; min-width: 0; padding: 4px 16px 0; scroll-snap-align: start; scroll-snap-stop: always; margin-bottom: 16px; }
+.puntos { display: flex; justify-content: center; gap: 6px; margin: 0 0 12px; }
+.puntos i { width: 7px; height: 7px; border-radius: 99px; background: var(--surface-3); transition: width .25s, background .25s; }
+.puntos i.on { width: 22px; background: var(--primary); }
 .tarjeta-bloque .plastico { margin-bottom: 12px; }
 .uso { margin-bottom: 12px; }
 .barra { height: 10px; border-radius: 99px; background: var(--surface-3); position: relative; margin: 10px 0 8px; }
