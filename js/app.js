@@ -180,15 +180,53 @@ const tc = () => num(estado.ajustes?.tipo_cambio) || 3.75;
 const enSoles = (m) => num(m.monto) * (m.moneda === 'USD' ? tc() : 1);
 
 /* ================= Piezas visuales ================= */
-const CHIP = '<svg class="pl-chip" viewBox="0 0 42 32"><rect x="1" y="1" width="40" height="30" rx="7" fill="#e8c766"/><path d="M1 11h13M1 21h13M28 11h13M28 21h13M14 1v30M28 1v30" stroke="#a98a2b" stroke-width="1.4" fill="none"/></svg>';
+const chip = (fondo = '#e8c766', linea = '#a98a2b') => `<svg class="pl-chip" viewBox="0 0 42 32"><rect x="1" y="1" width="40" height="30" rx="7" fill="${fondo}"/><path d="M1 11h13M1 21h13M28 11h13M28 21h13M14 1v30M28 1v30" stroke="${linea}" stroke-width="1.4" fill="none"/></svg>`;
+const CHIP = chip();
+const SIN_CONTACTO = '<svg class="pl-nfc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8.5 8.5a5 5 0 0 1 0 7M12 6a8.5 8.5 0 0 1 0 12M15.5 3.5a12 12 0 0 1 0 17"/></svg>';
+
+// Red (Visa / Mastercard / Amex) y nivel (Platinum, Oro…) a partir del nombre de la tarjeta.
+function redDe(t) {
+  const n = `${t.nombre} ${t.banco}`;
+  const red = /master/i.test(n) ? 'mc' : /amex|american/i.test(n) ? 'amex' : /visa/i.test(n) ? 'visa' : '';
+  const nivel = (n.match(/platinum|platino|signature|infinite|black|oro|gold|cl[aá]sica|world elite/i) || [''])[0];
+  return { red, nivel: nivel ? nivel[0].toUpperCase() + nivel.slice(1).toLowerCase() : '' };
+}
+function logoRed(red) {
+  if (red === 'visa') return '<span class="pl-visa">VISA</span>';
+  if (red === 'mc') return '<span class="pl-mc" aria-label="Mastercard"><i></i><i></i></span>';
+  if (red === 'amex') return '<span class="pl-amex">AMEX</span>';
+  return '';
+}
+
+// Diseño BBVA (como la tarjeta física): logo, chip con sin contacto, línea con la "A" y red abajo a la derecha.
+function plasticoBBVA(t, k, attrs) {
+  const { red, nivel } = redDe(t);
+  const platino = /platinum|platino/i.test(t.nombre);
+  return `<div class="plastico bbva ${platino ? 'platino' : ''}" style="--c:${esc(colorDe(t))}" ${attrs}>
+    <svg class="pl-deco" viewBox="0 0 300 189" aria-hidden="true">
+      <path d="M84 84H139M161 84H284" stroke="rgba(255,255,255,.45)" stroke-width="1.3"/>
+      <circle cx="285" cy="84" r="4.5" fill="rgba(30,32,38,.75)"/>
+      <path d="M108 168 140 70q3-8 10-8t10 8l32 98" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M118 168 150 76l32 92" fill="none" stroke="rgba(0,0,0,.14)" stroke-width="2"/>
+    </svg>
+    <div class="pl-top"><span class="logo-bbva">BBV<span>Λ</span></span><span class="pill ${k.nivel}">${pct(k.util)} usado</span></div>
+    <div class="pl-chiprow">${SIN_CONTACTO}${platino ? chip('#cfd2d6', '#8c9096') : CHIP}</div>
+    <div class="pl-bottom">
+      <div><span class="pl-num">•••• ${esc(t.ultimos4 || '····')}</span><small>Disponible</small><b>${money(k.disponible)}</b></div>
+      <div class="r pl-red"><small class="pl-credito">Crédito</small>${logoRed(red)}${nivel ? `<small class="pl-nivel">${esc(nivel)}</small>` : ''}</div>
+    </div>
+  </div>`;
+}
 
 function plastico(t, k, attrs = '') {
+  if (t.banco === 'BBVA') return plasticoBBVA(t, k, attrs);
+  const { red } = redDe(t);
   return `<div class="plastico" style="--c:${esc(colorDe(t))}" ${attrs}>
     <div class="pl-top"><span class="pl-banco">${esc(t.banco)}</span><span class="pill ${k.nivel}">${pct(k.util)} usado</span></div>
     ${CHIP}
     <div class="pl-num">•••• ${esc(t.ultimos4 || '····')}</div>
-    <div class="pl-bottom"><div><small>${esc(t.nombre)}</small><b>${money(k.usado)}</b></div>
-      <div class="r"><small>Disponible</small><b>${money(k.disponible)}</b></div></div>
+    <div class="pl-bottom"><div><small>${esc(t.nombre)}</small><b>Disponible ${money(k.disponible)}</b></div>
+      <div class="r pl-red">${logoRed(red)}</div></div>
   </div>`;
 }
 
