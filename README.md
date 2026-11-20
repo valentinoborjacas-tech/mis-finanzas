@@ -82,6 +82,20 @@ Cada vez que cambies algo: en GitHub Desktop escribe un resumen → **Commit to 
 Los correos que el script no puede leer quedan con la etiqueta **Mis Finanzas/Revisar** en Gmail para que
 los registres a mano.
 
+## Paso 6 · Notificaciones en el celular — 10 min
+
+Te llegan aunque la app esté cerrada, todos los días a las 9 a. m.: consejo del día, aviso de pago cercano,
+uso alto antes del corte y, los lunes, el resumen de la semana.
+
+1. **Base de datos:** Supabase → **SQL Editor** → **New query** → pega todo
+   [`supabase/notificaciones.sql`](supabase/notificaciones.sql) → **Run** → *Success*.
+2. **Función que envía los avisos:** Supabase → **Edge Functions** → **Deploy a new function** →
+   **Via Editor**. Nombre: `notificar` (exacto). Borra el código de ejemplo, pega todo
+   [`supabase/functions/notificar/index.ts`](supabase/functions/notificar/index.ts) → **Deploy function**.
+3. **En el iPhone** (iOS 16.4 o más reciente): la app debe estar instalada desde **Safari** con
+   Compartir → **Agregar a inicio**. Ábrela desde ese ícono → ⚙️ → **Activar notificaciones** → **Permitir**.
+4. Toca **Enviar prueba**: en unos segundos debe llegarte una notificación.
+
 ---
 
 ## Cómo usar la app para que te suban la línea

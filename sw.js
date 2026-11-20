@@ -1,5 +1,28 @@
 // Service worker: guarda la app para que abra rápido. Los datos siempre vienen de Supabase.
-const CACHE = 'mis-finanzas-v5';
+const CACHE = 'mis-finanzas-v6';
+
+// Notificaciones push (las envía la función "notificar" de Supabase).
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Mis Finanzas', {
+    body: d.body || '',
+    tag: d.tag,
+    icon: 'icon.svg',
+    badge: 'icon.svg',
+    data: { url: d.url || './' },
+  }));
+});
+
+// Al tocar la notificación: abre la app (o la trae al frente si ya está abierta).
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
+    const w = ws.find((c) => c.url.startsWith(self.registration.scope));
+    return w ? w.focus() : self.clients.openWindow(url);
+  }));
+});
 const ARCHIVOS = ['./', './index.html', './css/app.css', './js/app.js', './js/config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {

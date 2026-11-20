@@ -860,6 +860,57 @@ function formPagoDeuda(d) {
 }
 
 /* ---- Ajustes ---- */
+/* ---- Notificaciones push ---- */
+const esIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const instalada = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const soportaPush = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function claveABytes(b64) {
+  const s = atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+async function suscripcionActual() {
+  if (!soportaPush()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function estadoNotificaciones() {
+  const txt = $('#noti-estado');
+  const box = $('#noti-botones');
+  if (!txt) return;
+  let estadoTxt, botones;
+  if (esIOS && !instalada()) {
+    estadoTxt = 'En iPhone primero instala la app: en Safari toca Compartir → “Agregar a inicio”, y ábrela desde ese ícono.';
+    botones = '';
+  } else if (!soportaPush()) {
+    estadoTxt = 'Este navegador no permite notificaciones. En iPhone necesitas iOS 16.4 o más reciente.';
+    botones = '';
+  } else if (Notification.permission === 'denied') {
+    estadoTxt = 'Las notificaciones están bloqueadas. Actívalas en Ajustes del celular → Notificaciones → Mis Finanzas.';
+    botones = '';
+  } else if (await suscripcionActual()) {
+    estadoTxt = '✅ Activadas en este celular.';
+    botones = `<button type="button" class="btn" data-action="noti-probar">Enviar prueba</button>
+      <button type="button" class="btn danger" data-action="noti-desactivar">Desactivar</button>`;
+  } else {
+    estadoTxt = 'Desactivadas en este celular.';
+    botones = '<button type="button" class="btn primary" data-action="noti-activar">Activar notificaciones</button>';
+  }
+  txt.textContent = estadoTxt;
+  box.innerHTML = botones;
+}
+async function llamarNotificar(accion) {
+  const { data, error } = await sb.functions.invoke('notificar', { body: { accion } });
+  if (error) {
+    const status = error.context?.status;
+    let detalle = '';
+    try { detalle = (await error.context?.json())?.error || ''; } catch { /* sin cuerpo */ }
+    if (status === 404 || /Failed to send/i.test(error.message)) throw new Error('Falta instalar la función "notificar" en Supabase (ver README, paso 6).');
+    throw new Error(detalle || error.message || String(error));
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
 function formAjustes() {
   const a = estado.ajustes;
   const cuerpo = `
@@ -873,7 +924,14 @@ function formAjustes() {
     <p class="hint">Va en el script de Gmail (TOKEN_CORREO). No lo compartas.</p>
     <div class="btns" style="margin-top:10px"><button type="button" class="btn" data-action="copiar-token">Copiar</button>
     <button type="button" class="btn" data-action="nuevo-token">Generar otro</button></div>
+    <div class="form-grupo">
+      <h3>🔔 Notificaciones</h3>
+      <p class="hint" style="margin-top:0">Consejo diario a las 9 a. m., avisos de pago, uso alto antes del corte y resumen de los lunes.</p>
+      <p class="small" id="noti-estado" style="margin:10px 0">Revisando…</p>
+      <div class="btns" id="noti-botones"></div>
+    </div>
     <button type="button" class="btn danger block" style="margin-top:14px" data-action="salir">Cerrar sesión</button>`;
+  setTimeout(estadoNotificaciones, 0);
   abrirSheet('Ajustes', cuerpo, async (d) => {
     const { error } = await sb.from('ajustes').update({ tipo_cambio: num(d.tipo_cambio) || 3.75, dias_aviso: parseInt(d.dias_aviso, 10) || 0 }).eq('user_id', estado.user.id);
     if (error) throw error;
@@ -924,6 +982,37 @@ const ACCIONES = {
     await cargar(); formAjustes(); toast('Nuevo código generado');
   },
   async salir() { cerrarSheet(); await sb.auth.signOut(); },
+  async 'noti-activar'(el) {
+    // requestPermission debe ser lo primero tras el toque (iPhone lo exige).
+    const permiso = await Notification.requestPermission();
+    if (permiso !== 'granted') { toast('No se dio permiso para notificaciones'); return estadoNotificaciones(); }
+    el.disabled = true;
+    try {
+      const { clave } = await llamarNotificar('clave');
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: claveABytes(clave) });
+      const j = sub.toJSON();
+      const { error } = await sb.from('push_suscripciones').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: 'endpoint' });
+      if (error) throw error;
+      toast('🔔 Notificaciones activadas');
+    } catch (e) { toast(e.message || String(e)); }
+    estadoNotificaciones();
+  },
+  async 'noti-probar'(el) {
+    el.disabled = true;
+    try { const r = await llamarNotificar('probar'); toast(r.enviadas ? 'Prueba enviada: revisa tus notificaciones' : 'No se pudo enviar; desactiva y vuelve a activar'); }
+    catch (e) { toast(e.message || String(e)); }
+    el.disabled = false;
+  },
+  async 'noti-desactivar'() {
+    const sub = await suscripcionActual();
+    if (sub) {
+      await sb.from('push_suscripciones').delete().eq('endpoint', sub.endpoint);
+      await sub.unsubscribe();
+    }
+    toast('Notificaciones desactivadas');
+    estadoNotificaciones();
+  },
 };
 
 function irA(vista, filtro) {
