@@ -740,6 +740,15 @@ async function guardarMov(d, original) {
 function formTarjeta(t = null) {
   // Valor vigente del "pago del mes" (solo se muestra si aún aplica a este ciclo).
   const ajusteActivo = t && ajustePagoMes(t) ? t : null;
+  // La app guarda la deuda del día en que creaste la tarjeta y le suma/resta tus movimientos.
+  // En el formulario se muestra la deuda de HOY; al guardar se recalcula la inicial para que cuadre.
+  const kAct = t ? calcTarjeta(t) : null;
+  const deudaHoy = kAct ? kAct.deuda : { PEN: 0, USD: 0 };
+  const neto = kAct ? { PEN: kAct.deuda.PEN - num(t.deuda_inicial_pen), USD: kAct.deuda.USD - num(t.deuda_inicial_usd) } : { PEN: 0, USD: 0 };
+  const inicialDesde = (escrito, mon) => {
+    if (t && Math.abs(escrito - Number(deudaHoy[mon].toFixed(2))) < 0.005) return num(mon === 'PEN' ? t.deuda_inicial_pen : t.deuda_inicial_usd); // sin cambios
+    return Math.round((escrito - neto[mon]) * 100) / 100;
+  };
   const cuerpo = `
     ${campo('t-banco', 'Banco', `<select id="t-banco" name="banco">${BANCOS.map((b) => opt(b, b, t?.banco || 'Interbank')).join('')}</select>`)}
     ${campo('t-nombre', 'Nombre', `<input id="t-nombre" name="nombre" value="${esc(t?.nombre)}" placeholder="Ej. Interbank Visa Clásica">`)}
@@ -754,11 +763,12 @@ function formTarjeta(t = null) {
       <div>${campo('t-pago', 'Último día de pago', `<input id="t-pago" name="dia_pago" type="number" min="1" max="31" value="${esc(t?.dia_pago ?? '')}">`)}</div>
     </div>
     <div class="form-grupo">
-      <h3>Deuda total</h3>
-      <p class="hint" style="margin-top:0">Todo lo que debes hoy en la tarjeta (incluye compras en cuotas aún no cobradas).</p>
+      <h3>Deuda total hoy</h3>
+      <p class="hint" style="margin-top:0">Todo lo que debes hoy, como lo muestra tu banco (incluye compras en cuotas aún no cobradas).
+        ${t ? 'Si no coincide con tu banco, escribe el monto del banco y la app se ajusta sola.' : ''}</p>
       <div class="grid2">
-        <div>${campo('t-dpen', 'Soles S/', `<input id="t-dpen" name="deuda_inicial_pen" inputmode="decimal" value="${esc(t?.deuda_inicial_pen ?? 0)}">`)}</div>
-        <div>${campo('t-dusd', 'Dólares US$', `<input id="t-dusd" name="deuda_inicial_usd" inputmode="decimal" value="${esc(t?.deuda_inicial_usd ?? 0)}">`)}</div>
+        <div>${campo('t-dpen', 'Soles S/', `<input id="t-dpen" name="deuda_hoy_pen" inputmode="decimal" value="${esc(deudaHoy.PEN.toFixed(2))}">`)}</div>
+        <div>${campo('t-dusd', 'Dólares US$', `<input id="t-dusd" name="deuda_hoy_usd" inputmode="decimal" value="${esc(deudaHoy.USD.toFixed(2))}">`)}</div>
       </div>
     </div>
     <div class="form-grupo">
@@ -777,18 +787,15 @@ function formTarjeta(t = null) {
       banco: d.banco, nombre: d.nombre.trim(), ultimos4: d.ultimos4.trim() || null, linea: num(d.linea),
       tipo_cambio: num(d.tipo_cambio) > 0 ? num(d.tipo_cambio) : null,
       dia_corte: parseInt(d.dia_corte, 10), dia_pago: parseInt(d.dia_pago, 10),
-      deuda_inicial_pen: num(d.deuda_inicial_pen), deuda_inicial_usd: num(d.deuda_inicial_usd), color: d.color,
+      deuda_inicial_pen: inicialDesde(num(d.deuda_hoy_pen), 'PEN'), deuda_inicial_usd: inicialDesde(num(d.deuda_hoy_usd), 'USD'), color: d.color,
     };
+    if (num(d.deuda_hoy_pen) < 0 || num(d.deuda_hoy_usd) < 0) throw new Error('La deuda no puede ser negativa.');
     const vacio = (v) => String(v ?? '').trim() === '';
     if (vacio(d.facturado_inicial_pen) && vacio(d.facturado_inicial_usd)) {
       Object.assign(reg, { facturado_inicial_pen: null, facturado_inicial_usd: null, facturado_desde: null });
     } else {
       const fPen = num(d.facturado_inicial_pen), fUsd = num(d.facturado_inicial_usd);
-      // Deuda con la que se compara: la del formulario (tarjeta nueva) o la actual ajustada si cambiaste la inicial.
-      const k = t ? calcTarjeta(t) : null;
-      const deudaPen = k ? k.deuda.PEN + reg.deuda_inicial_pen - num(t.deuda_inicial_pen) : reg.deuda_inicial_pen;
-      const deudaUsd = k ? k.deuda.USD + reg.deuda_inicial_usd - num(t.deuda_inicial_usd) : reg.deuda_inicial_usd;
-      if (fPen > deudaPen + 0.009 || fUsd > deudaUsd + 0.009) throw new Error('El pago del mes no puede ser mayor que la deuda total.');
+      if (fPen > num(d.deuda_hoy_pen) + 0.009 || fUsd > num(d.deuda_hoy_usd) + 0.009) throw new Error('El pago del mes no puede ser mayor que la deuda total.');
       const sinCambios = ajusteActivo && num(t.facturado_inicial_pen) === fPen && num(t.facturado_inicial_usd) === fUsd;
       if (!sinCambios) Object.assign(reg, { facturado_inicial_pen: fPen, facturado_inicial_usd: fUsd, facturado_desde: new Date().toISOString() });
     }

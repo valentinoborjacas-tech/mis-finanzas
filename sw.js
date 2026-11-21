@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que abra rápido. Los datos siempre vienen de Supabase.
-const CACHE = 'mis-finanzas-v8';
+const CACHE = 'mis-finanzas-v9';
 
 // Notificaciones push (las envía la función "notificar" de Supabase).
 self.addEventListener('push', (e) => {
