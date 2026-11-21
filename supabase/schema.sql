@@ -33,6 +33,8 @@ create table if not exists public.tarjetas (
 -- Pago del mes (estado de cuenta) que faltaba pagar el día que registraste la tarjeta.
 alter table public.tarjetas add column if not exists facturado_inicial_pen numeric;
 alter table public.tarjetas add column if not exists facturado_inicial_usd numeric;
+-- Tipo de cambio propio de cada banco (si está vacío se usa el de Ajustes).
+alter table public.tarjetas add column if not exists tipo_cambio numeric check (tipo_cambio > 0);
 
 create table if not exists public.cuentas (
   id            uuid primary key default gen_random_uuid(),
@@ -168,7 +170,7 @@ returns table (nombre text, banco text, ultimos4 text, linea numeric, deuda_pen 
                dia_corte int, dia_pago int, tipo_cambio numeric, dias_aviso int)
 language sql security definer set search_path = public as $$
   select t.nombre, t.banco, t.ultimos4, t.linea, s.deuda_pen, s.deuda_usd,
-         t.dia_corte, t.dia_pago, a.tipo_cambio, a.dias_aviso
+         t.dia_corte, t.dia_pago, coalesce(t.tipo_cambio, a.tipo_cambio), a.dias_aviso
   from ajustes a
   join tarjetas t on t.user_id = a.user_id and t.activa
   join saldos_tarjeta s on s.tarjeta_id = t.id

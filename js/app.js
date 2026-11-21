@@ -92,8 +92,11 @@ function cortesEntre(f, L, dia) {
   return n;
 }
 
+// Tipo de cambio de la tarjeta: el de su banco si lo pusiste; si no, el general de Ajustes.
+const tcTarjeta = (t) => num(t.tipo_cambio) || num(estado.ajustes?.tipo_cambio) || 3.75;
+
 function calcTarjeta(t) {
-  const tc = num(estado.ajustes?.tipo_cambio) || 3.75;
+  const tc = tcTarjeta(t);
   const s = estado.saldosTarjeta[t.id];
   const deuda = { PEN: num(s ? s.deuda_pen : t.deuda_inicial_pen), USD: num(s ? s.deuda_usd : t.deuda_inicial_usd) };
   const usado = deuda.PEN + deuda.USD * tc;
@@ -357,9 +360,12 @@ const VISTAS = {
     const debe = { PEN: 0, USD: 0 };
     const ks = estado.tarjetas.filter((t) => t.activa).map((t) => [t, calcTarjeta(t)]);
     ks.forEach(([, k]) => { debe.PEN += k.deuda.PEN; debe.USD += k.deuda.USD; });
-    estado.deudas.filter((d) => d.activa && !d.tarjeta_id).forEach((d) => { debe[d.moneda] += saldoDeuda(d); });
+    let debeS = ks.reduce((s, [, k]) => s + k.usado, 0); // cada tarjeta con el tipo de cambio de su banco
+    estado.deudas.filter((d) => d.activa && !d.tarjeta_id).forEach((d) => {
+      debe[d.moneda] += saldoDeuda(d);
+      debeS += saldoDeuda(d) * (d.moneda === 'USD' ? tc() : 1);
+    });
     const tieneS = tiene.PEN + tiene.USD * tc();
-    const debeS = debe.PEN + debe.USD * tc();
 
     // Próximos pagos
     const pagos = [];
@@ -467,13 +473,17 @@ const VISTAS = {
             <div class="row"><span>Uso de línea</span><span class="pill ${k.nivel}">${pct(k.util)}</span></div>
             ${barraUso(k)}
             <div class="row"><span>Usado <b>${money(k.usado)}</b></span><span>Línea <b>${money(k.linea)}</b></span></div>
+            ${k.deuda.USD > 0.009 ? `<div class="uso-detalle">
+              <span>Soles <b>${money(k.deuda.PEN)}</b></span>
+              <span>Dólares <b>${money(k.deuda.USD, 'USD')}</b> × ${nf.format(k.tc)} = <b>${money(k.deuda.USD * k.tc)}</b></span>
+            </div>` : ''}
           </div>
           ${aviso}
           <div class="stats">
             ${pagoStat}
             <div class="stat"><span>Deuda total</span><b>${deudaTexto(k.deuda, '<br>')}</b><em>${k.desdeCorte.PEN + k.desdeCorte.USD > 0 ? `${money(k.desdeCorte.PEN)} desde el corte` : 'sin consumos nuevos'}</em></div>
             <div class="stat"><span>Próximo corte</span><b>${fechaCorta(k.c.proxCorte)}</b><em>${enDias(diasHasta(k.c.proxCorte))}</em></div>
-            <div class="stat"><span>Disponible</span><b>${money(k.disponible)}</b><em>TC S/ ${esc(tc())}</em></div>
+            <div class="stat"><span>Disponible</span><b>${money(k.disponible)}</b><em>TC ${esc(t.banco)}: S/ ${nf.format(k.tc)}${t.tipo_cambio ? '' : ' (general)'}</em></div>
           </div>
           <div class="btns">
             <button class="btn primary" data-action="pagar-tarjeta" data-id="${t.id}">Registrar pago</button>
@@ -555,6 +565,7 @@ function vistaCuentas() {
       : '<p class="vacio">Agrega tu efectivo y tus cuentas con el saldo de hoy.</p>'}</div>
     <div class="btns" style="margin-bottom:10px">
       <button class="btn" data-action="nuevo-mov" data-tipo="ingreso">${ic('down', 18)}Ingreso</button>
+      <button class="btn" data-action="nuevo-mov" data-tipo="gasto" data-medio="efectivo">${ic('up', 18)}Gasto</button>
       <button class="btn" data-action="nuevo-mov" data-tipo="transferencia">🔁 Transferir</button>
     </div>
     <button class="btn block ghost" data-action="nueva-cuenta">${ic('plus', 18)}Agregar cuenta o efectivo</button>`;
@@ -616,12 +627,16 @@ const gridCats = (tipo, sel) => {
 
 /* ---- Movimientos ---- */
 let movEditando = null;
-function formMovimiento(m = null, tipoInicial = 'gasto') {
+function formMovimiento(m = null, tipoInicial = 'gasto', prefierEfectivo = false) {
   movEditando = m;
   const tipo = m?.tipo || tipoInicial;
   const tarjetas = estado.tarjetas.filter((t) => t.activa || t.id === m?.tarjeta_id);
   const cuentas = estado.cuentas.filter((c) => c.activa || c.id === m?.cuenta_id || c.id === m?.cuenta_destino_id);
-  const medioSel = m ? (m.tarjeta_id ? `t:${m.tarjeta_id}` : m.cuenta_id ? `c:${m.cuenta_id}` : '') : (tarjetas[0] ? `t:${tarjetas[0].id}` : cuentas[0] ? `c:${cuentas[0].id}` : '');
+  // Desde Billetera, el gasto se propone con efectivo (o la primera cuenta); desde el botón +, con la primera tarjeta.
+  const efectivo = cuentas.find((c) => c.tipo === 'efectivo') || cuentas[0];
+  const medioSel = m ? (m.tarjeta_id ? `t:${m.tarjeta_id}` : m.cuenta_id ? `c:${m.cuenta_id}` : '')
+    : prefierEfectivo ? (efectivo ? `c:${efectivo.id}` : 'c:__efectivo__')
+      : (tarjetas[0] ? `t:${tarjetas[0].id}` : cuentas[0] ? `c:${cuentas[0].id}` : '');
   const medios = [...tarjetas.map((t) => [`t:${t.id}`, t.nombre, colorDe(t)]), ...cuentas.map((c) => [`c:${c.id}`, `${c.tipo === 'efectivo' ? '💵' : '🏦'} ${c.nombre}`])];
   const ctas = cuentas.map((c) => [c.id, `${c.tipo === 'efectivo' ? '💵' : '🏦'} ${c.nombre}`]);
   // Si aún no hay billetera de efectivo, se ofrece "Efectivo" y se crea sola al guardar.
@@ -726,6 +741,8 @@ function formTarjeta(t = null) {
       <div>${campo('t-u4', 'Últimos 4 dígitos', `<input id="t-u4" name="ultimos4" inputmode="numeric" maxlength="4" value="${esc(t?.ultimos4)}" placeholder="1234">`)}</div>
       <div>${campo('t-linea', 'Línea (S/)', `<input id="t-linea" name="linea" inputmode="decimal" value="${esc(t?.linea ?? '')}">`)}</div>
     </div>
+    ${campo('t-tc', 'Tipo de cambio de este banco (S/ por US$)', `<input id="t-tc" name="tipo_cambio" inputmode="decimal" value="${esc(t?.tipo_cambio ?? '')}" placeholder="${esc(nf.format(tc()))} (el general)">`,
+      'El que usa tu banco para cobrarte los consumos en dólares. Lo ves en su app o en tu estado de cuenta. Si lo dejas vacío se usa el de ⚙️ Ajustes.')}
     <div class="grid2">
       <div>${campo('t-corte', 'Día de corte', `<input id="t-corte" name="dia_corte" type="number" min="1" max="31" value="${esc(t?.dia_corte ?? '')}">`)}</div>
       <div>${campo('t-pago', 'Último día de pago', `<input id="t-pago" name="dia_pago" type="number" min="1" max="31" value="${esc(t?.dia_pago ?? '')}">`)}</div>
@@ -751,6 +768,7 @@ function formTarjeta(t = null) {
   abrirSheet(t ? 'Editar tarjeta' : 'Nueva tarjeta', cuerpo, async (d) => {
     const reg = {
       banco: d.banco, nombre: d.nombre.trim(), ultimos4: d.ultimos4.trim() || null, linea: num(d.linea),
+      tipo_cambio: num(d.tipo_cambio) > 0 ? num(d.tipo_cambio) : null,
       dia_corte: parseInt(d.dia_corte, 10), dia_pago: parseInt(d.dia_pago, 10),
       deuda_inicial_pen: num(d.deuda_inicial_pen), deuda_inicial_usd: num(d.deuda_inicial_usd), color: d.color,
     };
@@ -916,7 +934,7 @@ function formAjustes() {
   const cuerpo = `
     <p class="muted small">Sesión: ${esc(estado.user.email)}</p>
     <div class="grid2">
-      <div>${campo('a-tc', 'Tipo de cambio', `<input id="a-tc" name="tipo_cambio" inputmode="decimal" value="${esc(a.tipo_cambio)}">`)}</div>
+      <div>${campo('a-tc', 'Tipo de cambio general', `<input id="a-tc" name="tipo_cambio" inputmode="decimal" value="${esc(a.tipo_cambio)}">`)}</div>
       <div>${campo('a-dias', 'Avisar días antes', `<input id="a-dias" name="dias_aviso" type="number" min="0" max="15" value="${esc(a.dias_aviso)}">`)}</div>
     </div>
     <div class="lbl">Código para el lector de correos</div>
@@ -941,7 +959,7 @@ function formAjustes() {
 
 /* ================= Eventos ================= */
 const ACCIONES = {
-  'nuevo-mov': (el) => formMovimiento(null, el.dataset.tipo || 'gasto'),
+  'nuevo-mov': (el) => formMovimiento(null, el.dataset.tipo || 'gasto', el.dataset.medio === 'efectivo'),
   'editar-mov': (el) => formMovimiento(estado.movimientos.find((m) => m.id === el.dataset.id)),
   'nueva-tarjeta': () => formTarjeta(),
   'editar-tarjeta': (el) => formTarjeta(tarjetaPorId(el.dataset.id)),

@@ -92,7 +92,8 @@ async function mensajes(userId: string): Promise<Msg[]> {
 
   for (const t of ts.data || []) {
     const s = saldos.get(t.id);
-    const deuda = Number(s?.deuda_pen ?? t.deuda_inicial_pen) + Number(s?.deuda_usd ?? t.deuda_inicial_usd) * tc;
+    const tcT = Number(t.tipo_cambio) || tc; // tipo de cambio del banco de esta tarjeta
+    const deuda = Number(s?.deuda_pen ?? t.deuda_inicial_pen) + Number(s?.deuda_usd ?? t.deuda_inicial_usd) * tcT;
     const linea = Number(t.linea) || 0;
     const util = linea > 0 ? deuda / linea : 0;
 
@@ -107,7 +108,7 @@ async function mensajes(userId: string): Promise<Msg[]> {
     // Pendiente aproximado del estado de cuenta: deuda actual menos consumos hechos después del corte.
     const consumosDesdeCorte = movs
       .filter((m) => m.tarjeta_id === t.id && m.tipo === 'gasto' && diaLima(m.fecha) > corte)
-      .reduce((a, m) => a + Number(m.monto) * (m.moneda === 'USD' ? tc : 1), 0);
+      .reduce((a, m) => a + Number(m.monto) * (m.moneda === 'USD' ? tcT : 1), 0);
     const pendiente = deuda - consumosDesdeCorte;
 
     if (dPago >= 0 && dPago <= diasAviso && pendiente > 1) {
