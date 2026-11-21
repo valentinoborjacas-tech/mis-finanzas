@@ -33,6 +33,7 @@ create table if not exists public.tarjetas (
 -- Pago del mes (estado de cuenta) que faltaba pagar el día que registraste la tarjeta.
 alter table public.tarjetas add column if not exists facturado_inicial_pen numeric;
 alter table public.tarjetas add column if not exists facturado_inicial_usd numeric;
+alter table public.tarjetas add column if not exists facturado_desde timestamptz; -- cuándo escribiste el pago del mes
 -- Tipo de cambio propio de cada banco (si está vacío se usa el de Ajustes).
 alter table public.tarjetas add column if not exists tipo_cambio numeric check (tipo_cambio > 0);
 

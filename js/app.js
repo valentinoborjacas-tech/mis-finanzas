@@ -95,6 +95,22 @@ function cortesEntre(f, L, dia) {
 // Tipo de cambio de la tarjeta: el de su banco si lo pusiste; si no, el general de Ajustes.
 const tcTarjeta = (t) => num(t.tipo_cambio) || num(estado.ajustes?.tipo_cambio) || 3.75;
 
+// "Pago del mes" escrito a mano en la tarjeta: vale desde que lo guardaste hasta el siguiente corte.
+// Devuelve lo que falta pagar (descontando los pagos registrados después de guardarlo) o null si no aplica.
+function ajustePagoMes(t, c = ciclo(t)) {
+  if (t.facturado_inicial_pen == null && t.facturado_inicial_usd == null) return null;
+  const ref = new Date(t.facturado_desde || t.creado);
+  if (!(ref >= c.finCorte)) return null; // se guardó antes del último corte: ya no vale
+  const pagado = { PEN: 0, USD: 0 };
+  for (const m of estado.movimientos) {
+    if (m.tarjeta_id === t.id && m.tipo === 'pago_tarjeta' && new Date(m.creado || m.fecha) > ref) pagado[m.moneda] += num(m.monto);
+  }
+  return {
+    PEN: Math.max(0, num(t.facturado_inicial_pen) - pagado.PEN),
+    USD: Math.max(0, num(t.facturado_inicial_usd) - pagado.USD),
+  };
+}
+
 function calcTarjeta(t) {
   const tc = tcTarjeta(t);
   const s = estado.saldosTarjeta[t.id];
@@ -120,20 +136,10 @@ function calcTarjeta(t) {
     USD: Math.max(0, deuda.USD - desdeCorte.USD - noFacturado.USD),
   };
   // Tarjeta registrada después del último corte: la app aún no sabe qué parte de la deuda está facturada.
-  // Si diste el "pago del mes" al registrarla, se usa ese monto menos los pagos que registres desde ese día.
   let sinHistorial = Boolean(t.creado && new Date(t.creado) >= c.finCorte);
-  if (sinHistorial && (t.facturado_inicial_pen != null || t.facturado_inicial_usd != null)) {
-    const desde = new Date(t.creado); desde.setHours(0, 0, 0, 0);
-    const pagado = { PEN: 0, USD: 0 };
-    for (const m of estado.movimientos) {
-      if (m.tarjeta_id === t.id && m.tipo === 'pago_tarjeta' && new Date(m.fecha) >= desde) pagado[m.moneda] += num(m.monto);
-    }
-    pendiente = {
-      PEN: Math.max(0, num(t.facturado_inicial_pen) - pagado.PEN),
-      USD: Math.max(0, num(t.facturado_inicial_usd) - pagado.USD),
-    };
-    sinHistorial = false;
-  }
+  // Si escribiste el "pago del mes" a mano, manda ese monto (menos los pagos que registres después).
+  const ajuste = ajustePagoMes(t, c);
+  if (ajuste) { pendiente = ajuste; sinHistorial = false; }
   const hayPendiente = pendiente.PEN > 0.009 || pendiente.USD > 0.009;
   const pagoVencido = c.pago < hoy0();
   const paraBajar30 = Math.max(0, usado - 0.3 * linea);
@@ -732,8 +738,8 @@ async function guardarMov(d, original) {
 
 /* ---- Tarjetas ---- */
 function formTarjeta(t = null) {
-  // "Pago del mes" solo tiene sentido al crear la tarjeta o antes de su primer corte en la app.
-  const pideFacturado = !t || (t.creado && new Date(t.creado) >= ciclo(t).finCorte);
+  // Valor vigente del "pago del mes" (solo se muestra si aún aplica a este ciclo).
+  const ajusteActivo = t && ajustePagoMes(t) ? t : null;
   const cuerpo = `
     ${campo('t-banco', 'Banco', `<select id="t-banco" name="banco">${BANCOS.map((b) => opt(b, b, t?.banco || 'Interbank')).join('')}</select>`)}
     ${campo('t-nombre', 'Nombre', `<input id="t-nombre" name="nombre" value="${esc(t?.nombre)}" placeholder="Ej. Interbank Visa Clásica">`)}
@@ -755,15 +761,16 @@ function formTarjeta(t = null) {
         <div>${campo('t-dusd', 'Dólares US$', `<input id="t-dusd" name="deuda_inicial_usd" inputmode="decimal" value="${esc(t?.deuda_inicial_usd ?? 0)}">`)}</div>
       </div>
     </div>
-    ${pideFacturado ? `<div class="form-grupo">
+    <div class="form-grupo">
       <h3>Pago del mes</h3>
-      <p class="hint" style="margin-top:0">Lo que te <b>falta pagar</b> de tu último estado de cuenta (el “pago total del mes”). Si ya lo pagaste completo, pon 0.</p>
+      <p class="hint" style="margin-top:0">Lo que te <b>falta pagar hoy</b> de tu último estado de cuenta, según tu banco. Si ya lo pagaste completo, pon 0.
+        Los pagos que registres después se irán descontando.</p>
       <div class="grid2">
-        <div>${campo('t-fpen', 'Soles S/', `<input id="t-fpen" name="facturado_inicial_pen" inputmode="decimal" value="${esc(t?.facturado_inicial_pen ?? '')}" placeholder="0.00">`)}</div>
-        <div>${campo('t-fusd', 'Dólares US$', `<input id="t-fusd" name="facturado_inicial_usd" inputmode="decimal" value="${esc(t?.facturado_inicial_usd ?? '')}" placeholder="0.00">`)}</div>
+        <div>${campo('t-fpen', 'Soles S/', `<input id="t-fpen" name="facturado_inicial_pen" inputmode="decimal" value="${esc(ajusteActivo?.facturado_inicial_pen ?? '')}" placeholder="${t ? 'Automático' : '0.00'}">`)}</div>
+        <div>${campo('t-fusd', 'Dólares US$', `<input id="t-fusd" name="facturado_inicial_usd" inputmode="decimal" value="${esc(ajusteActivo?.facturado_inicial_usd ?? '')}" placeholder="${t ? 'Automático' : '0.00'}">`)}</div>
       </div>
-      <p class="hint">Solo se usa hasta tu próximo corte; después la app lo calcula sola.</p>
-    </div>` : ''}
+      <p class="hint">Vale hasta tu próximo corte; después la app lo calcula sola. Déjalo vacío para que lo calcule desde ya.</p>
+    </div>
     ${campo('t-color', 'Color de la tarjeta', `<input id="t-color" name="color" type="color" value="${esc(t ? colorDe(t) : COLOR_BANCO.Interbank)}" style="height:48px;padding:4px">`)}`;
   abrirSheet(t ? 'Editar tarjeta' : 'Nueva tarjeta', cuerpo, async (d) => {
     const reg = {
@@ -772,13 +779,18 @@ function formTarjeta(t = null) {
       dia_corte: parseInt(d.dia_corte, 10), dia_pago: parseInt(d.dia_pago, 10),
       deuda_inicial_pen: num(d.deuda_inicial_pen), deuda_inicial_usd: num(d.deuda_inicial_usd), color: d.color,
     };
-    if (pideFacturado) {
-      const vacio = (v) => String(v ?? '').trim() === '';
-      reg.facturado_inicial_pen = vacio(d.facturado_inicial_pen) && vacio(d.facturado_inicial_usd) ? null : num(d.facturado_inicial_pen);
-      reg.facturado_inicial_usd = reg.facturado_inicial_pen === null ? null : num(d.facturado_inicial_usd);
-      if (reg.facturado_inicial_pen > reg.deuda_inicial_pen + 0.009 || reg.facturado_inicial_usd > reg.deuda_inicial_usd + 0.009) {
-        throw new Error('El pago del mes no puede ser mayor que la deuda total.');
-      }
+    const vacio = (v) => String(v ?? '').trim() === '';
+    if (vacio(d.facturado_inicial_pen) && vacio(d.facturado_inicial_usd)) {
+      Object.assign(reg, { facturado_inicial_pen: null, facturado_inicial_usd: null, facturado_desde: null });
+    } else {
+      const fPen = num(d.facturado_inicial_pen), fUsd = num(d.facturado_inicial_usd);
+      // Deuda con la que se compara: la del formulario (tarjeta nueva) o la actual ajustada si cambiaste la inicial.
+      const k = t ? calcTarjeta(t) : null;
+      const deudaPen = k ? k.deuda.PEN + reg.deuda_inicial_pen - num(t.deuda_inicial_pen) : reg.deuda_inicial_pen;
+      const deudaUsd = k ? k.deuda.USD + reg.deuda_inicial_usd - num(t.deuda_inicial_usd) : reg.deuda_inicial_usd;
+      if (fPen > deudaPen + 0.009 || fUsd > deudaUsd + 0.009) throw new Error('El pago del mes no puede ser mayor que la deuda total.');
+      const sinCambios = ajusteActivo && num(t.facturado_inicial_pen) === fPen && num(t.facturado_inicial_usd) === fUsd;
+      if (!sinCambios) Object.assign(reg, { facturado_inicial_pen: fPen, facturado_inicial_usd: fUsd, facturado_desde: new Date().toISOString() });
     }
     if (!reg.nombre) throw new Error('Ponle un nombre a la tarjeta.');
     if (reg.ultimos4 && !/^\d{4}$/.test(reg.ultimos4)) throw new Error('Los últimos dígitos deben ser 4 números.');
